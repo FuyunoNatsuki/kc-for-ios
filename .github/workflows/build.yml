@@ -1,0 +1,51 @@
+# GitHubのMacでアプリをビルドし、未署名の .ipa を Releases に置く。
+# 署名はインストール時に SideStore / Sideloadly などが自分のApple IDで行う。
+name: Build IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen
+
+      - name: Build (unsigned)
+        run: |
+          xcodebuild -project KanBrowser.xcodeproj -target KanBrowser \
+            -configuration Release -sdk iphoneos \
+            SYMROOT="$PWD/build" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/Release-iphoneos/KanBrowser.app Payload/
+          zip -qry KanBrowser.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KanBrowser-ipa
+          path: KanBrowser.ipa
+
+      - name: Publish to release "latest"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest -y --cleanup-tag || true
+          gh release create latest KanBrowser.ipa \
+            --title "最新ビルド" \
+            --notes "自動ビルド ${GITHUB_SHA::7}（未署名。SideStore などでインストールしてください）"
