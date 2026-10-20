@@ -1,20 +1,35 @@
 # GitHubのMacでアプリをビルドし、未署名の .ipa を Releases に置く。
-# 署名はインストール時に SideStore / Sideloadly などが自分のApple IDで行う。
+# あわせて SideStore 用のソース (source.json) を更新するので、
+# SideStore にソースを登録しておけば push するたびに iPhone 側へ更新が届く。
 name: Build IPA
 
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - source.json
+      - "**.md"
   workflow_dispatch:
 
 permissions:
   contents: write
+
+concurrency:
+  group: build-ipa
+  cancel-in-progress: false
 
 jobs:
   build:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+
+      - name: Decide version
+        id: ver
+        run: |
+          BUILD=${{ github.run_number }}
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "version=1.0.$BUILD" >> "$GITHUB_OUTPUT"
 
       - name: Install XcodeGen
         run: brew install xcodegen
@@ -27,6 +42,8 @@ jobs:
           xcodebuild -project KanBrowser.xcodeproj -target KanBrowser \
             -configuration Release -sdk iphoneos \
             SYMROOT="$PWD/build" \
+            MARKETING_VERSION=${{ steps.ver.outputs.version }} \
+            CURRENT_PROJECT_VERSION=${{ steps.ver.outputs.build }} \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build
 
@@ -35,17 +52,36 @@ jobs:
           mkdir -p Payload
           cp -R build/Release-iphoneos/KanBrowser.app Payload/
           zip -qry KanBrowser.ipa Payload
+          /usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Payload/KanBrowser.app/Info.plist
 
       - uses: actions/upload-artifact@v4
         with:
           name: KanBrowser-ipa
           path: KanBrowser.ipa
 
-      - name: Publish to release "latest"
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: v${{ steps.ver.outputs.version }}
         run: |
+          gh release create "$TAG" KanBrowser.ipa \
+            --title "艦ブラ $TAG" \
+            --notes "自動ビルド ${GITHUB_SHA::7}（未署名。SideStore などでインストールしてください）" \
+            --latest
+          # 古い固定タグのリリースは使わなくなったので削除
           gh release delete latest -y --cleanup-tag || true
-          gh release create latest KanBrowser.ipa \
-            --title "最新ビルド" \
-            --notes "自動ビルド ${GITHUB_SHA::7}（未署名。SideStore などでインストールしてください）"
+
+      - name: Update SideStore source
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          BUILD: ${{ steps.ver.outputs.build }}
+        run: |
+          git pull --ff-only origin main
+          python3 .github/scripts/update_source.py "$VERSION" "$BUILD" KanBrowser.ipa \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${VERSION}/KanBrowser.ipa"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add source.json
+          git commit -m "source.json: v${VERSION} [skip ci]"
+          git push origin HEAD:main

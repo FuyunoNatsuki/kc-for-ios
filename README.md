@@ -29,8 +29,8 @@ DMM版「艦隊これくしょん」を iPhone / iPad で快適に遊ぶため�
    （`.github/workflows/build.yml` も含めること。隠しフォルダなので、
    Webからは「Add file → Create new file」でパスに `.github/workflows/build.yml` と入力し、中身を貼り付けると確実です）
 3. 「Actions」タブでビルドが走るのを待つ（約5〜10分）
-4. 完了すると「Releases」の **最新ビルド** に `KanBrowser.ipa` が置かれる
-   → iPhoneのSafariでダウンロードし、「ファイル」アプリに保存
+4. 完了すると「Releases」に `v1.0.<ビルド番号>` として `KanBrowser.ipa` が置かれ、
+   SideStore 用のソース `source.json` も自動で更新される
 
 ### ② iPhoneにインストールする
 `.ipa` は未署名なので、自分のApple IDで署名してくれるツールで入れます。
@@ -41,10 +41,20 @@ DMM版「艦隊これくしょん」を iPhone / iPad で快適に遊ぶため�
 3. iloader で Apple ID にサインインして SideStore をインストール
 4. iPhoneで 設定 → 一般 → VPNとデバイス管理 で開発元を「信頼」、
    プライバシーとセキュリティ → デベロッパモード をオン（再起動）
-5. LocalDevVPN を接続してから SideStore を開き、「＋」から `KanBrowser.ipa` を選ぶ
+5. LocalDevVPN を接続してから SideStore を開き、「Sources」→「＋」で次のURLを追加
+   ```
+   https://raw.githubusercontent.com/FuyunoNatsuki/kc-for-ios/main/source.json
+   ```
+6. 追加したソースの「艦ブラ」から「FREE（入手）」をタップしてインストール
 
-以降は PC不要。無料Apple IDは7日で期限が切れますが、SideStore がバックグラウンドで自動更新します
-（無料Apple IDはSideStore込みで3アプリまで）。
+以降は PC不要です。
+- **アプリの更新**：GitHubに push するたびに新しい版がソースに載り、SideStore の「My Apps」に
+  「UPDATE」が出るので、タップすれば最新版に更新されます（設定やデータはそのまま）。
+- **7日の期限**：無料Apple IDは7日で切れますが、SideStore がバックグラウンドで自動更新します
+  （無料Apple IDはSideStore込みで3アプリまで）。
+
+ソースを使わずに入れたい場合は、Releases から `KanBrowser.ipa` を「ファイル」アプリに保存し、
+SideStore の「My Apps」の「＋」から選んでも入れられます（この場合は更新も手動です）。
 
 **PCが一切ない場合**
 - iOS 27 以降なら、iPhoneだけで SideStore を入れられる「SideInstaller」という方法もあります。
