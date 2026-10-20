@@ -53,7 +53,7 @@ jobs:
           set -o pipefail
           if ! gradle --no-daemon assembleRelease 2>&1 | tee "$RUNNER_TEMP/gradle.log"; then
             # エラー行を注釈として出す（ログを開かなくても Actions の画面で原因が見える）
-            MSG=$(grep -E "^e: |error:|What went wrong|Could not|^> |^  > " "$RUNNER_TEMP/gradle.log" | head -60 \
+            MSG=$(grep -E "^e: |error:|What went wrong|Could not|^> [^T]|^  > " "$RUNNER_TEMP/gradle.log" | head -60 \
               | sed -e 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
             echo "::error title=Gradle build failed::${MSG}"
             exit 1

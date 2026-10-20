@@ -73,9 +73,10 @@ class WebController(private val activity: Activity, val game: GameState) {
             cacheMode = WebSettings.LOAD_DEFAULT
             userAgentString = DESKTOP_UA
         }
+        val view = this
         CookieManager.getInstance().apply {
             setAcceptCookie(true)
-            setAcceptThirdPartyCookies(this@apply, true)   // ゲームはDMMのiframe内で動くため必須
+            setAcceptThirdPartyCookies(view, true)   // ゲームはDMMのiframe内で動くため必須
         }
     }
 
