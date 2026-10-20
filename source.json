@@ -1,0 +1,42 @@
+{
+  "name": "艦ブラ",
+  "identifier": "io.github.fuyunonatsuki.kc-for-ios",
+  "subtitle": "iPhone用 艦これ専用ブラウザ",
+  "iconURL": "https://raw.githubusercontent.com/FuyunoNatsuki/kc-for-ios/main/docs/icon.png",
+  "website": "https://github.com/FuyunoNatsuki/kc-for-ios",
+  "apps": [
+    {
+      "name": "艦ブラ",
+      "bundleIdentifier": "com.example.kanbrowser",
+      "developerName": "FuyunoNatsuki",
+      "subtitle": "艦これを快適に遊ぶための専用ブラウザ",
+      "localizedDescription": "DMM版「艦隊これくしょん」をiPhoneで遊ぶための専用ブラウザです。\nゲーム画面のフィット表示、艦隊の疲労・損傷、遠征・入渠・建造の残り時間、受注中の任務を表示する情報パネル、完了通知に対応しています。",
+      "iconURL": "https://raw.githubusercontent.com/FuyunoNatsuki/kc-for-ios/main/docs/icon.png",
+      "tintColor": "1F4E79",
+      "category": "games",
+      "screenshots": [],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {
+          "NSPhotoLibraryAddUsageDescription": "スクリーンショットを写真に保存するために使用します"
+        }
+      },
+      "versions": [
+        {
+          "version": "1.0.2",
+          "buildVersion": "2",
+          "date": "2026-10-20T01:51:44Z",
+          "localizedDescription": "SideStoreソースによる自動更新に対応",
+          "downloadURL": "https://github.com/FuyunoNatsuki/kc-for-ios/releases/download/v1.0.2/KanBrowser.ipa",
+          "size": 217987,
+          "minOSVersion": "16.0"
+        }
+      ],
+      "version": "1.0.2",
+      "versionDate": "2026-10-20T01:51:44Z",
+      "downloadURL": "https://github.com/FuyunoNatsuki/kc-for-ios/releases/download/v1.0.2/KanBrowser.ipa",
+      "size": 217987
+    }
+  ],
+  "news": []
+}
