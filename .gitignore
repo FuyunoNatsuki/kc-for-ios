@@ -3,3 +3,10 @@ build/
 Payload/
 *.ipa
 .DS_Store
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/KanBrowser.apk

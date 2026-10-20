@@ -9,6 +9,8 @@ on:
     paths-ignore:
       - source.json
       - "**.md"
+      - "android/**"
+      - ".github/workflows/android.yml"
   workflow_dispatch:
 
 permissions:

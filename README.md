@@ -1,4 +1,4 @@
-# 艦ブラ — iPhone用 艦これ専用ブラウザ
+# 艦ブラ — iPhone / Android用 艦これ専用ブラウザ
 
 DMM版「艦隊これくしょん」を iPhone / iPad で快適に遊ぶための、WKWebView ベースの軽量ブラウザです。
 
@@ -71,6 +71,39 @@ open KanBrowser.xcodeproj
 ターゲットの Signing で自分の Apple ID を Team に選び、iPhone を接続して Run。
 
 ---
+
+---
+
+## Android版
+
+`android/` フォルダにあります。機能は iPhone 版と同じです
+（フィット表示・情報パネル・大破警告・遠征/入渠/建造の通知・自動更新）。
+
+### インストール
+1. Android の Chrome で [Releases](https://github.com/FuyunoNatsuki/kc-for-ios/releases) を開き、
+   `android-v1.0.N` の `KanBrowser.apk` をダウンロード
+2. ダウンロードした apk を開く →「この提供元のアプリを許可」をオンにしてインストール
+3. 初回起動時の「通知の許可」は「許可」に
+
+Google Play を通さないので、PC も Apple ID のような有効期限もありません。
+
+### 自動更新
+- アプリ起動時に GitHub を確認し、新しい版があれば「新しいバージョンがあります」と表示されます。
+  「更新する」でダウンロード → インストール画面が開きます（ログイン状態などはそのまま）。
+- メニュー（☰）の「アップデートを確認」で手動確認もできます。
+- 完全に自動で入れたい場合は、[Obtainium](https://github.com/ImranR98/Obtainium) に
+  このリポジトリの URL を追加し、「リリースのタイトルで絞り込み」に `Android` を設定してください。
+
+### 通知について
+Android 12 以降で通知が数分遅れる場合は、メニューの「通知を正確な時刻にする」から
+「アラームとリマインダー」を許可してください。
+
+### 署名鍵について
+アップデートを同じアプリとして入れるため、署名鍵 `android/keystore/release.jks` を
+リポジトリに同梱しています（公開リポジトリなので、第三者も同じ署名のapkを作れてしまいます）。
+気になる場合は、GitHub の Settings → Secrets and variables → Actions に
+`ANDROID_KEYSTORE_BASE64` などを登録すると、そちらの鍵で署名します
+（鍵を変えると、一度アンインストールしてから入れ直しが必要です）。
 
 ## 使い方
 - 起動すると DMM GAMES の艦これページが開くので、DMMアカウントでログイン

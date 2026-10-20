@@ -1,0 +1,71 @@
+# Android版をビルドして、署名済みの .apk を Releases（android-v1.0.N）に置く。
+# アプリ内の「アップデートを確認」や Obtainium はこのリリースを見て更新する。
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-apk
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.11.1"
+
+      - name: Build release APK
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          # リポジトリのシークレットに設定すれば、同梱の鍵の代わりにそちらで署名する
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            export KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
+          else
+            unset KEYSTORE_PASSWORD KEY_PASSWORD KEY_ALIAS
+          fi
+          gradle --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk KanBrowser.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KanBrowser-apk
+          path: android/KanBrowser.apk
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: android-v1.0.${{ github.run_number }}
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          NOTES=$(printf '%s' "$MSG" | head -n 1)
+          gh release create "$TAG" KanBrowser.apk \
+            --title "艦ブラ Android $TAG" \
+            --notes "${NOTES:-更新}（自動ビルド ${GITHUB_SHA::7}）" \
+            --latest=false
