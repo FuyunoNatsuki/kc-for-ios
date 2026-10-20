@@ -23,6 +23,15 @@
       },
       "versions": [
         {
+          "version": "1.0.4",
+          "buildVersion": "4",
+          "date": "2026-10-20T14:53:38Z",
+          "localizedDescription": "情報パネルに装備と出撃中のマスを表示",
+          "downloadURL": "https://github.com/FuyunoNatsuki/kc-for-ios/releases/download/v1.0.4/KanBrowser.ipa",
+          "size": 249486,
+          "minOSVersion": "16.0"
+        },
+        {
           "version": "1.0.3",
           "buildVersion": "3",
           "date": "2026-10-20T11:15:19Z",
@@ -41,10 +50,10 @@
           "minOSVersion": "16.0"
         }
       ],
-      "version": "1.0.3",
-      "versionDate": "2026-10-20T11:15:19Z",
-      "downloadURL": "https://github.com/FuyunoNatsuki/kc-for-ios/releases/download/v1.0.3/KanBrowser.ipa",
-      "size": 217988
+      "version": "1.0.4",
+      "versionDate": "2026-10-20T14:53:38Z",
+      "downloadURL": "https://github.com/FuyunoNatsuki/kc-for-ios/releases/download/v1.0.4/KanBrowser.ipa",
+      "size": 249486
     }
   ],
   "news": []
