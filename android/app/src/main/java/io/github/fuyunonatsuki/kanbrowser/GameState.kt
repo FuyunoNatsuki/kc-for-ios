@@ -43,6 +43,9 @@ data class Ship(
     val cond: Int = 49,
     val fuel: Int = 0,
     val bull: Int = 0,
+    val slots: List<Int> = emptyList(),   // 装備のインスタンスID（-1 = 空き）
+    val slotEx: Int = 0,                  // 補強増設（0 = 未開放, -1 = 空き）
+    val onslot: List<Int> = emptyList(),  // 各スロットの搭載数
 ) {
     val damage: Damage get() = Damage.of(nowhp, maxhp)
 }
@@ -72,6 +75,22 @@ data class Quest(
 )
 
 data class ShipMaster(val name: String, val fuel: Int, val bull: Int)
+data class ItemMaster(val name: String, val type: Int)
+data class Item(val id: Int, val masterId: Int, val level: Int, val alv: Int)
+
+/** 出撃中の状態（現在のマスと経路） */
+data class Sortie(
+    val area: Int,
+    val map: Int,
+    val cell: Int,
+    val eventId: Int,
+    val eventKind: Int,
+    val bossCell: Int,
+    val route: List<Int>,
+)
+
+/** 艦載機の装備種別（api_type[2]） */
+val aircraftTypes = setOf(6, 7, 8, 9, 10, 11, 25, 26, 41, 45, 47, 48, 49, 53, 56, 57, 58, 59, 94)
 
 // MARK: - 状態
 
@@ -83,16 +102,43 @@ class GameState(context: Context) {
     var kdocks by mutableStateOf<List<DockInfo>>(emptyList()); private set
     var quests by mutableStateOf<Map<Int, Quest>>(emptyMap()); private set
     var sortieDecks by mutableStateOf<Set<Int>>(emptySet()); private set
+    var items by mutableStateOf<Map<Int, Item>>(emptyMap()); private set
+    var sortie by mutableStateOf<Sortie?>(null); private set
     var lastUpdate by mutableStateOf(0L); private set
     var heavyAlert by mutableStateOf<List<String>>(emptyList())
+    var showEquipment by mutableStateOf(true)
 
     private var shipMaster: Map<Int, ShipMaster> = emptyMap()
     private var missionMaster: Map<Int, String> = emptyMap()
+    private var itemMaster: Map<Int, ItemMaster> = emptyMap()
+    private var mapMaster: Map<String, String> = emptyMap()
     private val cacheFile = File(context.filesDir, "master.json")
+    /** マップのマス番号 → アルファベット（KC3Kai の edges.json） */
+    @Volatile private var edges: JSONObject? = null
+    private val edgesFile = File(context.filesDir, "edges.json")
     var onTimersChanged: (() -> Unit)? = null
 
     init {
         runCatching { if (cacheFile.exists()) parseMaster(JSONObject(cacheFile.readText()), save = false) }
+        loadEdges()
+    }
+
+    /** マス名データを読み込み、3日以上古ければ取り直す */
+    private fun loadEdges() {
+        runCatching { if (edgesFile.exists()) edges = JSONObject(edgesFile.readText()) }
+        val old = !edgesFile.exists() || System.currentTimeMillis() - edgesFile.lastModified() > 3 * 86_400_000L
+        if (edges != null && !old) return
+        Thread {
+            runCatching {
+                val conn = java.net.URL(EDGES_URL).openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 15_000; conn.readTimeout = 30_000
+                if (conn.responseCode == 200) {
+                    val text = conn.inputStream.bufferedReader().use { it.readText() }
+                    val json = JSONObject(text)
+                    if (json.length() > 0) { edges = json; edgesFile.writeText(text) }
+                }
+            }
+        }.start()
     }
 
     // MARK: 表示用ヘルパー
@@ -103,6 +149,33 @@ class GameState(context: Context) {
     fun fuelMax(s: Ship) = shipMaster[s.masterId]?.fuel ?: 0
     fun bullMax(s: Ship) = shipMaster[s.masterId]?.bull ?: 0
     fun members(deck: Deck) = deck.shipIds.mapNotNull { ships[it] }
+
+    /** 装備の表示用テキスト（例: 「12.7cm連装砲 ★4」「零式艦戦21型 熟練7 ×18」） */
+    fun itemLabel(itemId: Int, onslot: Int? = null): String? {
+        if (itemId <= 0) return null
+        val it = items[itemId] ?: return "（装備情報なし）"
+        val m = itemMaster[it.masterId]
+        val sb = StringBuilder(m?.name ?: "装備ID ${it.masterId}")
+        if (it.level > 0) sb.append(" ★${it.level}")
+        if (it.alv > 0) sb.append(if (it.alv >= 7) " 熟練Max" else " 熟練${it.alv}")
+        if (onslot != null && onslot > 0 && m != null && m.type in aircraftTypes) sb.append(" ×$onslot")
+        return sb.toString()
+    }
+
+    fun equipment(ship: Ship): List<String> {
+        val out = ship.slots.mapIndexedNotNull { i, id -> itemLabel(id, ship.onslot.getOrNull(i)) }.toMutableList()
+        itemLabel(ship.slotEx)?.let { out += "［補強］$it" }
+        return out
+    }
+
+    fun cellName(area: Int, map: Int, cell: Int): String =
+        edges?.optJSONObject("World $area-$map")?.optJSONArray(cell.toString())?.optString(1)
+            ?.takeIf { it.isNotEmpty() } ?: cell.toString()
+
+    fun mapName(area: Int, map: Int): String {
+        val key = "$area-$map"
+        return mapMaster[key]?.let { "$key $it" } ?: key
+    }
 
     val hasHeavyInSortie: Boolean
         get() = decks.filter { it.id in sortieDecks }.flatMap { members(it) }.any { it.damage == Damage.HEAVY }
@@ -118,7 +191,31 @@ class GameState(context: Context) {
 
         when (path) {
             "api_start2/getData" -> parseMaster(d as? JSONObject ?: return, save = true)
+            "api_get_member/require_info" -> {
+                items = emptyMap(); mergeItems((d as? JSONObject)?.optJSONArray("api_slot_item"))
+            }
+            "api_get_member/slot_item" -> { items = emptyMap(); mergeItems(d as? JSONArray) }
+            "api_req_kousyou/createitem" -> {
+                val p = d as? JSONObject ?: return
+                mergeItems(p.optJSONArray("api_get_items"))
+                p.optJSONObject("api_slot_item")?.let { mergeItems(JSONArray().put(it)) }
+            }
+            "api_req_kousyou/remodel_slot" -> {
+                val p = d as? JSONObject ?: return
+                p.optJSONObject("api_after_slot")?.let { mergeItems(JSONArray().put(it)) }
+                val used = p.optJSONArray("api_use_slot_id").longs().map { it.toInt() }
+                if (used.isNotEmpty()) items = items - used.toSet()
+            }
+            "api_req_kousyou/destroyitem2" -> {
+                val ids = req["api_slotitem_ids"].orEmpty().split(",").mapNotNull { it.trim().toIntOrNull() }
+                items = items - ids.toSet()
+            }
+            "api_req_map/next" -> {
+                val p = d as? JSONObject ?: return
+                sortie?.let { val s = updateSortie(it, p); sortie = s.copy(route = s.route + s.cell) }
+            }
             "api_port/port" -> {
+                sortie = null
                 val p = d as? JSONObject ?: return
                 ships = emptyMap()
                 mergeShips(p.optJSONArray("api_ship"))
@@ -150,6 +247,7 @@ class GameState(context: Context) {
                 val p = d as? JSONObject ?: return
                 kdocks = p.optJSONArray("api_kdock").objects().map(::parseKdock)
                 p.optJSONObject("api_ship")?.let { mergeShips(JSONArray().put(it)) }
+                mergeItems(p.optJSONArray("api_slotitem"))
                 onTimersChanged?.invoke()
             }
             "api_req_hokyu/charge" -> {
@@ -180,6 +278,11 @@ class GameState(context: Context) {
                 req["api_quest_id"]?.toIntOrNull()?.let { quests = quests - it }
             }
             "api_req_map/start" -> {
+                (d as? JSONObject)?.let { p ->
+                    val s = updateSortie(Sortie(p.optInt("api_maparea_id"), p.optInt("api_mapinfo_no"), 0, 0, 0, 0,
+                        emptyList()), p)
+                    sortie = s.copy(route = listOf(s.cell))
+                }
                 val deck = req["api_deck_id"]?.toIntOrNull()
                 if (deck != null) {
                     var s = setOf(deck)
@@ -211,8 +314,18 @@ class GameState(context: Context) {
             val id = s.optInt("api_id")
             mm[id] = "${s.optString("api_disp_no", id.toString())} ${s.optString("api_name")}"
         }
+        val im = HashMap<Int, ItemMaster>()
+        for (s in d.optJSONArray("api_mst_slotitem").objects()) {
+            im[s.optInt("api_id")] = ItemMaster(s.optString("api_name", "?"), s.optJSONArray("api_type")?.optInt(2) ?: 0)
+        }
+        val mp = HashMap<String, String>()
+        for (s in d.optJSONArray("api_mst_mapinfo").objects()) {
+            mp["${s.optInt("api_maparea_id")}-${s.optInt("api_no")}"] = s.optString("api_name")
+        }
         shipMaster = sm
         missionMaster = mm
+        itemMaster = im
+        mapMaster = mp
         if (save) {
             // 必要な項目だけ保存
             val out = JSONObject()
@@ -226,6 +339,18 @@ class GameState(context: Context) {
                 for (s in d.optJSONArray("api_mst_mission").objects()) {
                     put(JSONObject().put("api_id", s.optInt("api_id"))
                         .put("api_disp_no", s.optString("api_disp_no")).put("api_name", s.optString("api_name")))
+                }
+            })
+            out.put("api_mst_slotitem", JSONArray().apply {
+                im.forEach { (id, m) ->
+                    put(JSONObject().put("api_id", id).put("api_name", m.name)
+                        .put("api_type", JSONArray().put(0).put(0).put(m.type)))
+                }
+            })
+            out.put("api_mst_mapinfo", JSONArray().apply {
+                mp.forEach { (k, name) ->
+                    val (a, n) = k.split("-")
+                    put(JSONObject().put("api_maparea_id", a.toInt()).put("api_no", n.toInt()).put("api_name", name))
                 }
             })
             runCatching { cacheFile.writeText(out.toString()) }
@@ -245,10 +370,31 @@ class GameState(context: Context) {
                 cond = s.optInt("api_cond", 49),
                 fuel = s.optInt("api_fuel"),
                 bull = s.optInt("api_bull"),
+                slots = s.optJSONArray("api_slot").longs().map { it.toInt() },
+                slotEx = s.optInt("api_slot_ex"),
+                onslot = s.optJSONArray("api_onslot").longs().map { it.toInt() },
             )
         }
         ships = m
     }
+
+    private fun mergeItems(list: JSONArray?) {
+        val add = list.objects().filter { it.optInt("api_id") > 0 }
+        if (add.isEmpty()) return
+        val m = items.toMutableMap()
+        for (s in add) {
+            val id = s.optInt("api_id")
+            m[id] = Item(id, s.optInt("api_slotitem_id"), s.optInt("api_level"), s.optInt("api_alv"))
+        }
+        items = m
+    }
+
+    private fun updateSortie(s: Sortie, p: JSONObject) = s.copy(
+        cell = p.optInt("api_no"),
+        eventId = p.optInt("api_event_id"),
+        eventKind = p.optInt("api_event_kind"),
+        bossCell = if (p.has("api_bosscell_no")) p.optInt("api_bosscell_no") else s.bossCell,
+    )
 
     private fun mergeDecks(list: JSONArray?) {
         val items = list.objects().map(::parseDeck)
@@ -364,6 +510,21 @@ class GameState(context: Context) {
     }
 
     companion object {
+        const val EDGES_URL = "https://raw.githubusercontent.com/KC3Kai/KC3Kai/master/src/data/edges.json"
+
+        fun eventLabel(id: Int, kind: Int): String = when (id) {
+            2 -> "資源"
+            3 -> "渦潮"
+            4 -> when (kind) { 2 -> "夜戦"; 4 -> "航空戦"; 6 -> "空襲戦"; else -> "戦闘" }
+            5 -> "ボス"
+            6 -> if (kind == 2) "能動分岐" else "気のせい"
+            7 -> if (kind == 0) "航空偵察" else "航空戦"
+            8 -> "護衛成功"
+            9 -> "揚陸地点"
+            10 -> "空襲戦"
+            else -> ""
+        }
+
         fun parseForm(s: String): Map<String, String> = s.split("&").filter { it.isNotEmpty() }.associate {
             val kv = it.split("=", limit = 2)
             val dec = { x: String -> runCatching { URLDecoder.decode(x, "UTF-8") }.getOrDefault(x) }

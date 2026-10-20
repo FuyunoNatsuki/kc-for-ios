@@ -3,6 +3,7 @@
 package io.github.fuyunonatsuki.kanbrowser
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -84,6 +85,7 @@ fun StatusPanel(game: GameState, onClose: () -> Unit, modifier: Modifier = Modif
 @Composable
 private fun FleetView(game: GameState) {
     var deckId by remember { mutableIntStateOf(1) }
+    game.sortie?.let { SortieBanner(game, it) }
     if (game.decks.isNotEmpty()) {
         SecondaryTabRow(selectedTabIndex = game.decks.indexOfFirst { it.id == deckId }.coerceAtLeast(0),
             containerColor = Color.Transparent) {
@@ -99,11 +101,41 @@ private fun FleetView(game: GameState) {
         if (deck.id in game.sortieDecks) Tag("出撃中", Color(0xFF2F6FED))
         if (deck.missionState == 1) Tag("遠征中", Color(0xFF1E9E95))
         Spacer(Modifier.weight(1f))
+        Text(if (game.showEquipment) "装備▲" else "装備▼", color = Color(0xFF6FA8DC), fontSize = 12.sp,
+            modifier = Modifier.clickable { game.showEquipment = !game.showEquipment }.padding(horizontal = 8.dp))
         members.minOfOrNull { it.cond }?.let {
             Text("最低cond $it", color = condColor(it), fontSize = 12.sp)
         }
     }
     members.forEach { ShipRow(game, it) }
+}
+
+/** 出撃中のマップ・現在のマス・経路 */
+@Composable
+private fun SortieBanner(game: GameState, sortie: Sortie) {
+    val name = { c: Int -> game.cellName(sortie.area, sortie.map, c) }
+    val event = GameState.eventLabel(sortie.eventId, sortie.eventKind)
+    Column(
+        Modifier.fillMaxWidth().background(Color(0x332F6FED), RoundedCornerShape(8.dp)).padding(8.dp),
+    ) {
+        Text("⚑ " + game.mapName(sortie.area, sortie.map), color = Color.White, fontSize = 12.sp,
+            maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("現在 ", color = Sub, fontSize = 12.sp)
+            Text(name(sortie.cell), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            if (event.isNotEmpty()) {
+                Text(event, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 8.dp)
+                        .background(if (sortie.eventId == 5) Color(0x99F44336) else Color(0x662F6FED), RoundedCornerShape(50))
+                        .padding(horizontal = 6.dp, vertical = 1.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            if (sortie.bossCell > 0) Text("ボス ${name(sortie.bossCell)}", color = Sub, fontSize = 12.sp)
+        }
+        if (sortie.route.size > 1) {
+            Text("経路 " + sortie.route.joinToString(" → ") { name(it) }, color = Sub, fontSize = 11.sp, maxLines = 2)
+        }
+    }
 }
 
 @Composable
@@ -138,6 +170,14 @@ private fun ShipRow(game: GameState, ship: Ship) {
             Text("${ship.nowhp}/${ship.maxhp}", color = Color.White, fontSize = 12.sp, fontFamily = FontFamily.Monospace,
                 modifier = Modifier.width(64.dp).padding(start = 6.dp))
             if (fMax > 0 && (ship.fuel < fMax || ship.bull < bMax)) Text("補給", color = Color(0xFFFF9800), fontSize = 11.sp)
+        }
+        if (game.showEquipment) {
+            val eq = game.equipment(ship)
+            if (eq.isNotEmpty()) Column(Modifier.padding(top = 3.dp)) {
+                eq.forEach { line ->
+                    Text("・$line", color = Sub, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
         }
     }
 }

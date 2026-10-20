@@ -8,6 +8,7 @@ struct StatusPanel: View {
     enum Tab: String, CaseIterable { case fleet = "艦隊", timers = "遠征・ドック", quests = "任務" }
     @State private var tab: Tab = .fleet
     @State private var deckId = 1
+    @AppStorage("showEquipment") private var showEquipment = true
 
     var body: some View {
         VStack(spacing: 8) {
@@ -47,6 +48,7 @@ struct StatusPanel: View {
 
     private var fleetView: some View {
         VStack(alignment: .leading, spacing: 6) {
+            if let sortie = game.sortie { SortieBanner(game: game, sortie: sortie) }
             if !game.decks.isEmpty {
                 Picker("", selection: $deckId) {
                     ForEach(game.decks) { d in Text("第\(d.id)").tag(d.id) }
@@ -59,13 +61,17 @@ struct StatusPanel: View {
                     if game.sortieDecks.contains(deck.id) { tag("出撃中", .blue) }
                     if deck.missionState == 1 { tag("遠征中", .teal) }
                     Spacer()
+                    Button { showEquipment.toggle() } label: {
+                        Image(systemName: showEquipment ? "wrench.and.screwdriver.fill" : "wrench.and.screwdriver")
+                            .font(.caption)
+                    }
                     let ships = game.members(of: deck)
                     if !ships.isEmpty {
                         Text("最低cond \(ships.map(\.cond).min() ?? 0)")
                             .font(.caption).foregroundStyle(condColor(ships.map(\.cond).min() ?? 49))
                     }
                 }
-                ForEach(game.members(of: deck)) { ShipRow(game: game, ship: $0) }
+                ForEach(game.members(of: deck)) { ShipRow(game: game, ship: $0, showEquipment: showEquipment) }
             }
         }
     }
@@ -181,9 +187,47 @@ func condColor(_ cond: Int) -> Color {
     cond >= 50 ? .yellow : cond >= 30 ? .primary : cond >= 20 ? .orange : .red
 }
 
+/// 出撃中のマップ・現在のマス・経路
+struct SortieBanner: View {
+    @ObservedObject var game: GameState
+    let sortie: Sortie
+
+    var body: some View {
+        let name = { (c: Int) in game.cellName(area: sortie.area, map: sortie.map, cell: c) }
+        let event = GameState.eventLabel(id: sortie.eventId, kind: sortie.eventKind)
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 6) {
+                Image(systemName: "flag.fill").font(.caption).foregroundStyle(.blue)
+                Text(game.mapName(area: sortie.area, map: sortie.map)).font(.caption).lineLimit(1)
+                Spacer()
+            }
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("現在").font(.caption).foregroundStyle(.secondary)
+                Text(name(sortie.cell)).font(.title3.bold())
+                if !event.isEmpty {
+                    Text(event).font(.caption.bold())
+                        .padding(.horizontal, 6).padding(.vertical, 1)
+                        .background((sortie.eventId == 5 ? Color.red : Color.blue).opacity(0.4), in: Capsule())
+                }
+                Spacer()
+                if sortie.bossCell > 0 {
+                    Text("ボス \(name(sortie.bossCell))").font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            if sortie.route.count > 1 {
+                Text("経路 " + sortie.route.map(name).joined(separator: " → "))
+                    .font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+            }
+        }
+        .padding(8)
+        .background(Color.blue.opacity(0.18), in: RoundedRectangle(cornerRadius: 8))
+    }
+}
+
 struct ShipRow: View {
     @ObservedObject var game: GameState
     let ship: Ship
+    var showEquipment = true
 
     var body: some View {
         let dmg = ship.damage
@@ -208,6 +252,17 @@ struct ShipRow: View {
                 Text("\(ship.nowhp)/\(ship.maxhp)").font(.caption.monospacedDigit()).frame(width: 56, alignment: .trailing)
                 if fMax > 0 && (ship.fuel < fMax || ship.bull < bMax) {
                     Image(systemName: "fuelpump.fill").font(.caption2).foregroundStyle(.orange)
+                }
+            }
+            if showEquipment {
+                let eq = game.equipment(of: ship)
+                if !eq.isEmpty {
+                    VStack(alignment: .leading, spacing: 1) {
+                        ForEach(Array(eq.enumerated()), id: \.offset) { _, line in
+                            Text("・" + line).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        }
+                    }
+                    .padding(.top, 2)
                 }
             }
         }

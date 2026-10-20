@@ -42,8 +42,29 @@ struct Ship: Identifiable {
     var cond = 49
     var fuel = 0
     var bull = 0
+    var slots: [Int] = []      // 装備のインスタンスID（-1 = 空き）
+    var slotEx = 0             // 補強増設（0 = 未開放, -1 = 空き）
+    var onslot: [Int] = []     // 各スロットの搭載数
 
     var damage: Damage { Damage(now: nowhp, max: maxhp) }
+}
+
+struct Item {
+    let id: Int
+    var masterId: Int
+    var level: Int             // 改修値 ★
+    var alv: Int               // 熟練度 0〜7
+}
+
+/// 出撃中の状態（現在のマスと経路）
+struct Sortie {
+    var area: Int
+    var map: Int
+    var cell: Int
+    var eventId: Int
+    var eventKind: Int
+    var bossCell: Int
+    var route: [Int]
 }
 
 struct Deck: Identifiable {
@@ -71,10 +92,26 @@ struct Quest: Identifiable {
 }
 
 struct ShipMaster: Codable { var name: String; var fuel: Int; var bull: Int }
+struct ItemMaster: Codable { var name: String; var type: Int }
 struct MasterCache: Codable {
     var ships: [Int: ShipMaster] = [:]
     var missions: [Int: String] = [:]
+    var items: [Int: ItemMaster] = [:]
+    var maps: [String: String] = [:]      // "1-5" → マップ名
+
+    init() {}
+    // 古いキャッシュ（items / maps なし）も読めるように
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        ships = try c.decodeIfPresent([Int: ShipMaster].self, forKey: .ships) ?? [:]
+        missions = try c.decodeIfPresent([Int: String].self, forKey: .missions) ?? [:]
+        items = try c.decodeIfPresent([Int: ItemMaster].self, forKey: .items) ?? [:]
+        maps = try c.decodeIfPresent([String: String].self, forKey: .maps) ?? [:]
+    }
 }
+
+/// 艦載機の装備種別（api_type[2]）
+let aircraftTypes: Set<Int> = [6, 7, 8, 9, 10, 11, 25, 26, 41, 45, 47, 48, 49, 53, 56, 57, 58, 59, 94]
 
 // MARK: - 状態
 
@@ -87,6 +124,10 @@ final class GameState: ObservableObject {
     @Published private(set) var kdocks: [DockInfo] = []
     @Published private(set) var quests: [Int: Quest] = [:]
     @Published private(set) var sortieDecks: Set<Int> = []
+    @Published private(set) var items: [Int: Item] = [:]
+    @Published private(set) var sortie: Sortie?
+    /// マップのマス番号 → アルファベット（KC3Kai の edges.json）
+    private var edges: [String: [String: [String]]] = [:]
     @Published private(set) var lastUpdate: Date?
     @Published var heavyAlert: [String] = []
 
@@ -99,11 +140,39 @@ final class GameState: ObservableObject {
         return dir.appendingPathComponent("master.json")
     }
 
+    private static var edgesURL: URL { cacheURL.deletingLastPathComponent().appendingPathComponent("edges.json") }
+    private static let edgesSource = URL(string: "https://raw.githubusercontent.com/KC3Kai/KC3Kai/master/src/data/edges.json")!
+
     init() {
         if let data = try? Data(contentsOf: Self.cacheURL),
            let m = try? JSONDecoder().decode(MasterCache.self, from: data) {
             master = m
         }
+        loadEdges()
+    }
+
+    /// マス名データを読み込み、3日以上古ければ取り直す
+    private func loadEdges() {
+        let url = Self.edgesURL
+        if let data = try? Data(contentsOf: url) { parseEdges(data) }
+        let age = (try? url.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate)
+            .map { Date().timeIntervalSince($0) } ?? .infinity
+        guard edges.isEmpty || age > 3 * 86400 else { return }
+        URLSession.shared.dataTask(with: Self.edgesSource) { [weak self] data, response, _ in
+            guard let data, (response as? HTTPURLResponse)?.statusCode == 200 else { return }
+            Task { @MainActor in
+                guard let self else { return }
+                if self.parseEdges(data) { try? data.write(to: url) }
+            }
+        }.resume()
+    }
+
+    @discardableResult
+    private func parseEdges(_ data: Data) -> Bool {
+        guard let e = try? JSONSerialization.jsonObject(with: data) as? [String: [String: [String]]], !e.isEmpty
+        else { return false }
+        edges = e
+        return true
     }
 
     // MARK: 表示用ヘルパー
@@ -114,6 +183,51 @@ final class GameState: ObservableObject {
     func fuelMax(_ s: Ship) -> Int { master.ships[s.masterId]?.fuel ?? 0 }
     func bullMax(_ s: Ship) -> Int { master.ships[s.masterId]?.bull ?? 0 }
     func members(of deck: Deck) -> [Ship] { deck.shipIds.compactMap { ships[$0] } }
+
+    /// 装備の表示用テキスト（例: 「12.7cm連装砲 ★4」「零式艦戦21型 熟練7 ×18」）
+    func itemLabel(_ itemId: Int, onslot: Int? = nil) -> String? {
+        guard itemId > 0 else { return nil }
+        guard let it = items[itemId] else { return "（装備情報なし）" }
+        let m = master.items[it.masterId]
+        var s = m?.name ?? "装備ID \(it.masterId)"
+        if it.level > 0 { s += " ★\(it.level)" }
+        if it.alv > 0 { s += it.alv >= 7 ? " 熟練Max" : " 熟練\(it.alv)" }
+        if let n = onslot, n > 0, let t = m?.type, aircraftTypes.contains(t) { s += " ×\(n)" }
+        return s
+    }
+
+    func equipment(of ship: Ship) -> [String] {
+        var out: [String] = []
+        for (i, id) in ship.slots.enumerated() {
+            if let l = itemLabel(id, onslot: i < ship.onslot.count ? ship.onslot[i] : nil) { out.append(l) }
+        }
+        if let l = itemLabel(ship.slotEx) { out.append("［補強］" + l) }
+        return out
+    }
+
+    func cellName(area: Int, map: Int, cell: Int) -> String {
+        edges["World \(area)-\(map)"]?[String(cell)].flatMap { $0.count > 1 ? $0[1] : nil } ?? "\(cell)"
+    }
+
+    func mapName(area: Int, map: Int) -> String {
+        let key = "\(area)-\(map)"
+        return master.maps[key].map { "\(key) \($0)" } ?? key
+    }
+
+    static func eventLabel(id: Int, kind: Int) -> String {
+        switch id {
+        case 2: return "資源"
+        case 3: return "渦潮"
+        case 4: return kind == 2 ? "夜戦" : kind == 4 ? "航空戦" : kind == 6 ? "空襲戦" : "戦闘"
+        case 5: return "ボス"
+        case 6: return kind == 2 ? "能動分岐" : "気のせい"
+        case 7: return kind == 0 ? "航空偵察" : "航空戦"
+        case 8: return "護衛成功"
+        case 9: return "揚陸地点"
+        case 10: return "空襲戦"
+        default: return ""
+        }
+    }
 
     var hasHeavyInSortie: Bool {
         decks.filter { sortieDecks.contains($0.id) }
@@ -135,7 +249,26 @@ final class GameState: ObservableObject {
         switch path {
         case "api_start2/getData":
             parseMaster(dict(d))
+        case "api_get_member/require_info":
+            items = [:]
+            mergeItems(arr(dict(d)["api_slot_item"]))
+        case "api_get_member/slot_item":
+            items = [:]
+            mergeItems(arr(d))
+        case "api_req_kousyou/createitem":
+            let p = dict(d)
+            mergeItems(arr(p["api_get_items"]).filter { int(dict($0)["api_id"]) > 0 })
+            if let one = p["api_slot_item"] { mergeItems([one]) }
+        case "api_req_kousyou/remodel_slot":
+            let p = dict(d)
+            if let after = p["api_after_slot"] { mergeItems([after]) }
+            for id in arr(p["api_use_slot_id"]) { items[int(id)] = nil }
+        case "api_req_kousyou/destroyitem2":
+            for id in (req["api_slotitem_ids"] ?? "").split(separator: ",") { items[Int(id) ?? 0] = nil }
+        case "api_req_map/next":
+            if var s = sortie { updateSortie(&s, dict(d)); s.route.append(s.cell); sortie = s }
         case "api_port/port":
+            sortie = nil
             let p = dict(d)
             ships = [:]
             mergeShips(arr(p["api_ship"]))
@@ -163,6 +296,7 @@ final class GameState: ObservableObject {
             let p = dict(d)
             kdocks = arr(p["api_kdock"]).map(parseKdock)
             if let s = p["api_ship"] { mergeShips([s]) }
+            mergeItems(arr(p["api_slotitem"]))
             onTimersChanged?()
         case "api_req_hokyu/charge":
             for item in arr(dict(d)["api_ship"]) {
@@ -186,6 +320,10 @@ final class GameState: ObservableObject {
         case "api_req_quest/clearitemget", "api_req_quest/stop":
             if let q = Int(req["api_quest_id"] ?? "") { quests[q] = nil }
         case "api_req_map/start":
+            let p = dict(d)
+            var s = Sortie(area: int(p["api_maparea_id"]), map: int(p["api_mapinfo_no"]), cell: 0,
+                           eventId: 0, eventKind: 0, bossCell: 0, route: [])
+            updateSortie(&s, p); s.route = [s.cell]; sortie = s
             if let deck = Int(req["api_deck_id"] ?? "") {
                 sortieDecks = [deck]
                 // 連合艦隊は第1+第2艦隊
@@ -218,6 +356,16 @@ final class GameState: ObservableObject {
             let no = s["api_disp_no"] as? String ?? "\(int(s["api_id"]))"
             m.missions[int(s["api_id"])] = "\(no) \(s["api_name"] as? String ?? "")"
         }
+        for item in arr(d["api_mst_slotitem"]) {
+            let s = dict(item)
+            let type = arr(s["api_type"])
+            m.items[int(s["api_id"])] = ItemMaster(name: s["api_name"] as? String ?? "?",
+                                                   type: type.count > 2 ? int(type[2]) : 0)
+        }
+        for item in arr(d["api_mst_mapinfo"]) {
+            let s = dict(item)
+            m.maps["\(int(s["api_maparea_id"]))-\(int(s["api_no"]))"] = s["api_name"] as? String ?? ""
+        }
         master = m
         if let data = try? JSONEncoder().encode(m) { try? data.write(to: Self.cacheURL) }
     }
@@ -233,8 +381,27 @@ final class GameState: ObservableObject {
                              maxhp: int(s["api_maxhp"]),
                              cond: int(s["api_cond"]),
                              fuel: int(s["api_fuel"]),
-                             bull: int(s["api_bull"]))
+                             bull: int(s["api_bull"]),
+                             slots: arr(s["api_slot"]).map { int($0) },
+                             slotEx: int(s["api_slot_ex"]),
+                             onslot: arr(s["api_onslot"]).map { int($0) })
         }
+    }
+
+    private func mergeItems(_ list: [Any]) {
+        for item in list {
+            let s = dict(item)
+            let id = int(s["api_id"]); guard id > 0 else { continue }
+            items[id] = Item(id: id, masterId: int(s["api_slotitem_id"]),
+                             level: int(s["api_level"]), alv: int(s["api_alv"]))
+        }
+    }
+
+    private func updateSortie(_ s: inout Sortie, _ p: [String: Any]) {
+        s.cell = int(p["api_no"])
+        s.eventId = int(p["api_event_id"])
+        s.eventKind = int(p["api_event_kind"])
+        if p["api_bosscell_no"] != nil { s.bossCell = int(p["api_bosscell_no"]) }
     }
 
     private func mergeDecks(_ list: [Any]) {
