@@ -250,11 +250,9 @@ final class GameState: ObservableObject {
         case "api_start2/getData":
             parseMaster(dict(d))
         case "api_get_member/require_info":
-            items = [:]
-            mergeItems(arr(dict(d)["api_slot_item"]))
+            mergeItems(arr(dict(d)["api_slot_item"]), replace: true)
         case "api_get_member/slot_item":
-            items = [:]
-            mergeItems(arr(d))
+            mergeItems(arr(d), replace: true)
         case "api_req_kousyou/createitem":
             let p = dict(d)
             mergeItems(arr(p["api_get_items"]).filter { int(dict($0)["api_id"]) > 0 })
@@ -262,16 +260,18 @@ final class GameState: ObservableObject {
         case "api_req_kousyou/remodel_slot":
             let p = dict(d)
             if let after = p["api_after_slot"] { mergeItems([after]) }
-            for id in arr(p["api_use_slot_id"]) { items[int(id)] = nil }
+            let used = arr(p["api_use_slot_id"]).map { int($0) }
+            if !used.isEmpty { var m = items; used.forEach { m[$0] = nil }; items = m }
         case "api_req_kousyou/destroyitem2":
-            for id in (req["api_slotitem_ids"] ?? "").split(separator: ",") { items[Int(id) ?? 0] = nil }
+            var m = items
+            for id in (req["api_slotitem_ids"] ?? "").split(separator: ",") { m[Int(id) ?? 0] = nil }
+            items = m
         case "api_req_map/next":
             if var s = sortie { updateSortie(&s, dict(d)); s.route.append(s.cell); sortie = s }
         case "api_port/port":
             sortie = nil
             let p = dict(d)
-            ships = [:]
-            mergeShips(arr(p["api_ship"]))
+            mergeShips(arr(p["api_ship"]), replace: true)
             decks = arr(p["api_deck_port"]).map(parseDeck)
             ndocks = arr(p["api_ndock"]).map(parseDock)
             sortieDecks = []
@@ -299,11 +299,13 @@ final class GameState: ObservableObject {
             mergeItems(arr(p["api_slotitem"]))
             onTimersChanged?()
         case "api_req_hokyu/charge":
+            var m = ships
             for item in arr(dict(d)["api_ship"]) {
                 let s = dict(item); let id = int(s["api_id"])
-                ships[id]?.fuel = int(s["api_fuel"])
-                ships[id]?.bull = int(s["api_bull"])
+                m[id]?.fuel = int(s["api_fuel"])
+                m[id]?.bull = int(s["api_bull"])
             }
+            ships = m
         case "api_req_nyukyo/start":
             if req["api_highspeed"] == "1", let id = Int(req["api_ship_id"] ?? ""), let s = ships[id] {
                 ships[id]?.nowhp = s.maxhp
@@ -370,7 +372,10 @@ final class GameState: ObservableObject {
         if let data = try? JSONEncoder().encode(m) { try? data.write(to: Self.cacheURL) }
     }
 
-    private func mergeShips(_ list: [Any]) {
+    private func mergeShips(_ list: [Any], replace: Bool = false) {
+        guard !list.isEmpty || replace else { return }
+        var ships = replace ? [:] : self.ships
+        defer { self.ships = ships }
         for item in list {
             let s = dict(item)
             let id = int(s["api_id"]); guard id > 0 else { continue }
@@ -388,7 +393,10 @@ final class GameState: ObservableObject {
         }
     }
 
-    private func mergeItems(_ list: [Any]) {
+    private func mergeItems(_ list: [Any], replace: Bool = false) {
+        guard !list.isEmpty || replace else { return }
+        var items = replace ? [:] : self.items
+        defer { self.items = items }
         for item in list {
             let s = dict(item)
             let id = int(s["api_id"]); guard id > 0 else { continue }

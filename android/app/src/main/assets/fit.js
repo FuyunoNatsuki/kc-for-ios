@@ -13,16 +13,49 @@
     if (!m) { m = document.createElement('meta'); m.name = 'viewport'; document.head.appendChild(m); }
     m.content = content;
   }
+  /* ゲーム以外の部分（広告・おすすめ枠など）を止める。
+     visibility:hidden だけだと裏で動き続けてメモリと電池を使うため、
+     ほかの iframe は外し、ゲーム枠の祖先以外は display:none にする。 */
+  function trim(f) {
+    var frames = document.getElementsByTagName('iframe');
+    for (var i = frames.length - 1; i >= 0; i--) {
+      var fr = frames[i];
+      if (fr === f || fr.contains(f)) continue;
+      try { fr.src = 'about:blank'; } catch (e) {}
+      if (fr.parentNode) fr.parentNode.removeChild(fr);
+    }
+    var node = f;
+    while (node && node !== document.body && node.parentNode) {
+      var p = node.parentNode;
+      for (var c = p.firstElementChild; c; c = c.nextElementSibling) {
+        if (c === node || c.tagName === 'SCRIPT' || c.tagName === 'STYLE' || c.tagName === 'LINK') continue;
+        if (c.hasAttribute('data-kan-hidden')) continue;
+        c.setAttribute('data-kan-hidden', c.style.getPropertyValue('display'));
+        c.style.setProperty('display', 'none', 'important');
+      }
+      node = p;
+    }
+  }
+  function untrim() {
+    var list = document.querySelectorAll('[data-kan-hidden]');
+    for (var i = 0; i < list.length; i++) {
+      var c = list[i], v = c.getAttribute('data-kan-hidden');
+      c.removeAttribute('data-kan-hidden');
+      if (v) c.style.setProperty('display', v); else c.style.removeProperty('display');
+    }
+  }
   function apply() {
     var f = document.getElementById('game_frame');
     var st = document.getElementById('__kanfit_style');
     if (!state.on) {
       if (st) st.remove();
+      untrim();
       if (f) setViewport('width=1240');
       post(false);
       return true;
     }
     if (!f) { post(false); return false; }
+    trim(f);
     setViewport('width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover');
     if (!st) { st = document.createElement('style'); st.id = '__kanfit_style'; document.head.appendChild(st); }
     var vw = window.innerWidth, vh = window.innerHeight;

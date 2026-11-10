@@ -46,7 +46,10 @@ class WebController(private val activity: Activity, val game: GameState) {
     var gameFound by mutableStateOf(false); private set
     var fitMode by mutableStateOf(prefs.getBoolean("fitMode", true)); private set
     var yOffset by mutableStateOf(prefs.getInt("yOffset", 0)); private set
+    /** フレームレートを30fpsに抑える（発熱による性能低下を防ぐ）。切り替えると再読み込み */
+    var limitFps by mutableStateOf(prefs.getBoolean("limitFps", true)); private set
     var onRendererGone: (() -> Unit)? = null
+    private var startScript: androidx.webkit.ScriptHandler? = null
 
     private val fitJs = activity.assets.open("fit.js").bufferedReader().use { it.readText() }
     private val startJs = activity.assets.open("start.js").bufferedReader().use { it.readText() }
@@ -84,7 +87,7 @@ class WebController(private val activity: Activity, val game: GameState) {
         val origins = setOf("*")
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
             // 全フレーム（ゲーム本体の iframe 含む）にページ読み込み前に注入
-            WebViewCompat.addDocumentStartJavaScript(webView, startJs, origins)
+            installStartScript()
         }
         if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
             WebViewCompat.addWebMessageListener(webView, "kanbridge", origins) { _, message, _, _, _ ->
@@ -150,6 +153,19 @@ class WebController(private val activity: Activity, val game: GameState) {
 
     fun setFit(on: Boolean) {
         fitMode = on; prefs.edit().putBoolean("fitMode", on).apply(); applyFit()
+    }
+
+    private fun installStartScript() {
+        startScript?.remove()
+        startScript = WebViewCompat.addDocumentStartJavaScript(
+            webView, "window.__kanCap = ${if (limitFps) 30 else 0};\n$startJs", setOf("*"))
+    }
+
+    fun setLimitFps(on: Boolean) {
+        if (on == limitFps) return
+        limitFps = on; prefs.edit().putBoolean("limitFps", on).apply()
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) installStartScript()
+        webView.reload()
     }
 
     fun setOffset(v: Int) {

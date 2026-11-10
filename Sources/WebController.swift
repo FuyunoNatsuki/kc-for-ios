@@ -18,6 +18,20 @@ final class WebController: NSObject, ObservableObject {
     @Published var yOffset: Double {
         didSet { UserDefaults.standard.set(yOffset, forKey: "yOffset"); applyFit() }
     }
+    /// フレームレートを30fpsに抑える（発熱による性能低下を防ぐ）。切り替えると再読み込み
+    @Published var limitFPS: Bool {
+        didSet {
+            guard limitFPS != oldValue else { return }
+            UserDefaults.standard.set(limitFPS, forKey: "limitFPS")
+            installScripts(); webView.reload()
+        }
+    }
+    @Published var showFPS: Bool {
+        didSet { UserDefaults.standard.set(showFPS, forKey: "showFPS"); if !showFPS { fps = nil } }
+    }
+    /// ゲーム画面の実際のフレームレート（診断用）
+    @Published private(set) var fps: Int?
+    private var fpsReported = Date.distantPast
 
     let webView: WKWebView
     let game: GameState
@@ -27,23 +41,24 @@ final class WebController: NSObject, ObservableObject {
         let d = UserDefaults.standard
         fitMode = d.object(forKey: "fitMode") as? Bool ?? true
         yOffset = d.double(forKey: "yOffset")
+        limitFPS = d.object(forKey: "limitFPS") as? Bool ?? true
+        showFPS = d.bool(forKey: "showFPS")
 
         let config = WKWebViewConfiguration()
         config.allowsInlineMediaPlayback = true
         config.mediaTypesRequiringUserActionForPlayback = []
         config.websiteDataStore = .default()   // ログイン状態を保持
 
-        let uc = WKUserContentController()
-        uc.addUserScript(WKUserScript(source: Scripts.apiCapture, injectionTime: .atDocumentStart, forMainFrameOnly: false))
-        uc.addUserScript(WKUserScript(source: Scripts.allFrames, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
-        uc.addUserScript(WKUserScript(source: Scripts.mainFrame, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
-        config.userContentController = uc
+        config.userContentController = WKUserContentController()
 
         webView = WKWebView(frame: .zero, configuration: config)
         super.init()
 
+        let uc = config.userContentController
+        installScripts()
         uc.add(WeakHandler(self), name: "kanfit")
         uc.add(WeakHandler(self), name: "kanapi")
+        uc.add(WeakHandler(self), name: "kanfps")
 
         webView.customUserAgent = Self.desktopUA
         webView.navigationDelegate = self
@@ -55,6 +70,15 @@ final class WebController: NSObject, ObservableObject {
         webView.scrollView.bounces = false
         webView.allowsBackForwardNavigationGestures = false
         goHome()
+    }
+
+    private func installScripts() {
+        let uc = webView.configuration.userContentController
+        uc.removeAllUserScripts()
+        uc.addUserScript(WKUserScript(source: Scripts.apiCapture(cap: limitFPS ? 30 : 0),
+                                      injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        uc.addUserScript(WKUserScript(source: Scripts.allFrames, injectionTime: .atDocumentEnd, forMainFrameOnly: false))
+        uc.addUserScript(WKUserScript(source: Scripts.mainFrame, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
     }
 
     // MARK: - Actions
@@ -97,6 +121,11 @@ final class WebController: NSObject, ObservableObject {
         case "kanfit":
             gameFound = (message.body as? Bool) ?? false
             updateScrollLock()
+        case "kanfps":
+            // 複数のフレームから届くので、2秒以内は大きい方（＝ゲーム本体）を採用
+            guard showFPS, let v = message.body as? Int else { return }
+            let now = Date()
+            if now.timeIntervalSince(fpsReported) > 2.5 || v > (fps ?? 0) { fps = v; fpsReported = now }
         case "kanapi":
             guard let m = message.body as? [String: Any],
                   let path = m["path"] as? String, let text = m["text"] as? String else { return }

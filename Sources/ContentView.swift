@@ -40,6 +40,15 @@ struct ContentView: View {
                 }
 
                 HeavyDamageBanner(game: web.game)
+
+                if web.showFPS {
+                    Text(web.fps.map { "\($0) fps" } ?? "-- fps")
+                        .font(.caption2.monospacedDigit().bold())
+                        .foregroundStyle((web.fps ?? 60) < 20 ? Color.red : Color.white.opacity(0.6))
+                        .padding(4)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        .allowsHitTesting(false)
+                }
             }
         }
         .statusBarHidden(true)
@@ -72,6 +81,8 @@ struct ContentView: View {
             Button { web.goHome() } label: { Label("ゲームページへ", systemImage: "house") }
             Toggle(isOn: $web.fitMode) { Label("画面にフィット", systemImage: "arrow.up.left.and.arrow.down.right") }
             Button { showOffset = true } label: { Label("表示位置の微調整", systemImage: "slider.vertical.3") }
+            Toggle(isOn: $web.limitFPS) { Label("省電力（30fps）", systemImage: "leaf") }
+            Toggle(isOn: $web.showFPS) { Label("FPSを表示", systemImage: "speedometer") }
             Button { web.snapshot() } label: { Label("スクリーンショット", systemImage: "camera") }
             Divider()
             Button(role: .destructive) { confirmClear = true } label: {
