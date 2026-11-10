@@ -88,7 +88,7 @@ fun MainScreen(
                         DropdownMenuItem(
                             text = { Text("省電力（30fps）") },
                             trailingIcon = { Switch(checked = web.limitFps, onCheckedChange = null) },
-                            onClick = { web.setLimitFps(!web.limitFps) },
+                            onClick = { web.toggleLimitFps(!web.limitFps) },
                         )
                         DropdownMenuItem(text = { Text("スクリーンショット") }, onClick = { showMenu = false; web.snapshot() })
                         DropdownMenuItem(text = { Text("通知を正確な時刻にする") }, onClick = { showMenu = false; onExactAlarm() })

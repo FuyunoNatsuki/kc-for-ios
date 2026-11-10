@@ -161,7 +161,7 @@ class WebController(private val activity: Activity, val game: GameState) {
             webView, "window.__kanCap = ${if (limitFps) 30 else 0};\n$startJs", setOf("*"))
     }
 
-    fun setLimitFps(on: Boolean) {
+    fun toggleLimitFps(on: Boolean) {
         if (on == limitFps) return
         limitFps = on; prefs.edit().putBoolean("limitFps", on).apply()
         if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) installStartScript()
